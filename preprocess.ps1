@@ -37,6 +37,8 @@ function preProcessPageContent($content, $pageName) {
     #handle some common mistakes that pandoc does not understand
     $content = $content -replace '\|framed\|','|frame|'
     $content = $content -replace '\|framed\]\]','|frame]]'  
+    # remove DynamicPageContent and other expressions in {{ }}
+    $content = $content -replace '(?ms){{.*}}', ''
 
     $content = parseLineByLine $content
     $content = handleMailToBlocks $content
@@ -282,6 +284,8 @@ function preProcessTemplateContent($content) {
     $content = $content -replace '\[\[(.*?)\|(.*?)\]\]','[[$1]]' 
     # encode parameter syntax so that pandoc ignores it
     $content = $content -replace '{{{((.|\n)*?)}}}','%7B%7B%7B$1%7D%7D%7D'
+    # remove DynamicPageContent and other expressions in {{ }}
+    $content = $content -replace '(?ms){{.*}}', ''
 
     return $content
     
