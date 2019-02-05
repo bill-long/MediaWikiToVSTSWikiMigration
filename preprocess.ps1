@@ -6,7 +6,7 @@ param(
     [string]$mediawikiDomain
 )
 
-$variablesPath  = $PSScriptRoot + '\.\Variables.ps1'
+$variablesPath  = $PSScriptRoot + [IO.Path]::DirectorySeparatorChar + '.' + [IO.Path]::DirectorySeparatorChar + 'Variables.ps1'
 . $variablesPath
 
 $mailToOrg = '@microsoft.com'

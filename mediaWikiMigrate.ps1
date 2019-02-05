@@ -21,7 +21,7 @@ param(
     [string]$mailToOrg
     )
 
-    $variablesPath  = $PSScriptRoot + '\.\Variables.ps1'
+    $variablesPath  = $PSScriptRoot + [IO.Path]::DirectorySeparatorChar + 'Variables.ps1'
     . $variablesPath
 
 #input
@@ -33,9 +33,9 @@ $password = ConvertTo-SecureString $pwd -AsPlainText -Force
 
 $wikiName = $vstsWikiRemoteUrl|split-path -leaf
 $rootPath = $o
-$localMachinePath = $o + $wikiName + '\'
+$localMachinePath = $o + $wikiName + $separator
 
-$attachmentFolderPath = $localMachinePath + $attachmentFolderName + '\'
+$attachmentFolderPath = $localMachinePath + $attachmentFolderName + $separator
 
 #local
 $mediaWikiGetCategoryMembers=$mediaWikiCoreUrl + 'action=query&list=categorymembers&cmlimit=500&cmtitle='
@@ -342,10 +342,10 @@ function getAllPagesNameAndHierarchy() {
 
         # move all unparented the pages to this hierarchy by default
         If($relativePath -eq $separator  ) {
-                $relativePath = '\Orphaned-pages\'
+                $relativePath = $separator + 'Orphaned-pages' + $separator
        }
 
-        $relativePath  = $relativePath -replace '\\Hierarchy\%2DTop\\','\' #hardoded here for regex escaping
+        $relativePath  = $relativePath -replace '\\Hierarchy\%2DTop\\',$separator #hardoded here for regex escaping
         $fileName = $localMachinePath + $relativePath + $urlencodedPageName + ".md"
 
         $allPagesPathMap.Add($item, $fileName)  
@@ -369,7 +369,7 @@ function getAllCategories() {
             ForEach($child in $res.query.allcategories) {
                 $title = $child.psobject.properties.value
                 $fulltitle = $mediaWikiCategoryPrefix + $title
-                $rootPath = '.\' + $orphanedPagesFolder + $separator + $title
+                $rootPath = '.' + $separator + $orphanedPagesFolder + $separator + $title
                 createTreeForCategory -root $fulltitle -rootPath $rootPath
                 $mediaWikiAllCategoriesTitleArray.Add($fulltitle)
             }
@@ -593,7 +593,7 @@ function getAlternateFilePath($pathName) {
     $fullPath = $pathName
     while(Test-Path $fullPath) {
         $counter++
-        $fullPath = $newPathName +"\" + $newFileName + '(' + $counter + ')' + '.md'
+        $fullPath = $newPathName + $separator + $newFileName + '(' + $counter + ')' + '.md'
     }
 
     return $fullPath
@@ -698,14 +698,14 @@ function migratePage($path, $pageName) {
     # why we read write the file content again and again instead of single read in the beginnign and write at the end
     # pandoc (used in processPage step) does not take in raw content instead takes the file path to read and write
     Write-Host 'preprocessing '$path 'file: '$pageName
-    $preprocessScriptPath = $PSScriptRoot + '\.\preProcess.ps1'
+    $preprocessScriptPath = $PSScriptRoot + $separator + 'preProcess.ps1'
     & $preprocessScriptPath -pagePath $path -pageName $pageName -mediawikiDomain $mediawikiDomain
 
     Write-Host 'processing '$path 'file: '$pageNam
     processPage $path
 
     Write-Host 'postprocessing '$path 'file: '$pageNam
-    $postprocessScriptPath = $PSScriptRoot + '\.\postProcess.ps1'
+    $postprocessScriptPath = $PSScriptRoot + $separator + 'postProcess.ps1'
     & $postprocessScriptPath -pagePath $path -pageName $pageName -allPagesPathMap $allPagesPathMap -allTemplatesPathMap $allTemplatesPathMap -renamedTempalteArr $renamedTempalteArr -localMachinePath $localMachinePath -originalmMediaWikiUrl $originalmMediaWikiUrl -mediawikiDomain $mediawikiDomain
     
 
@@ -713,14 +713,14 @@ function migratePage($path, $pageName) {
 
 function migrateTemplate($content, $pageName) {
     Write-Host 'preprocessing '$path ' template : '$pageName
-    $preprocessScriptPath = $PSScriptRoot + '\.\preProcess.ps1'
+    $preprocessScriptPath = $PSScriptRoot + $separator + 'preProcess.ps1'
     & $preprocessScriptPath -templatePath $path -templateName $pageName -mediawikiDomain $mediawikiDomain
 
     Write-Host 'processing '$path ' template : '$pageName
     processTemplate $path
 
     Write-Host 'postprocessing '$path ' template : '$pageName
-    $postprocessScriptPath = $PSScriptRoot + '\.\postProcess.ps1'
+    $postprocessScriptPath = $PSScriptRoot + $separator + 'postProcess.ps1'
     & $postprocessScriptPath -templatePath $path -templateName $pageName -mediawikiDomain $mediawikiDomain -allPagesPathMap $allPagesPathMap -allTemplatesPathMap $allTemplatesPathMap -renamedTempalteArr $renamedTempalteArr -localMachinePath $localMachinePath -originalmMediaWikiUrl $originalmMediaWikiUrl
 }
 
@@ -958,7 +958,7 @@ function migrateToVSTSWiki() {
     CopyPagesToTemplatesFolder
     removeRootCategoryPage
 
-    $finalizingScriptPath = $PSScriptRoot + '\.\finalize.ps1'
+    $finalizingScriptPath = $PSScriptRoot + $separator + '.' + $separator + 'finalize.ps1'
     if(Test-Path $finalizingScriptPath)
     {     
         & $finalizingScriptPath -allPagesPathMap $allPagesPathMap -allTemplatesPathMap $allTemplatesPathMap -mediaWikiCoreUrl $mediaWikiCoreUrl -localMachinePath $localMachinePath -renamedItems $renamedItems

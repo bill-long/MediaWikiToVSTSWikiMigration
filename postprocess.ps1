@@ -11,7 +11,7 @@ param(
     [string]$originalmMediaWikiUrl
 )
 
-$variablesPath  = $PSScriptRoot + '\.\Variables.ps1'
+$variablesPath  = $PSScriptRoot + [IO.Path]::DirectorySeparatorChar + '.' + [IO.Path]::DirectorySeparatorChar + 'Variables.ps1'
 . $variablesPath
 
 function postProcessPage($path) {
@@ -330,11 +330,11 @@ function fixTempalteSymbol($content) {
 
             # fix the template name only if we identify it
             if($allTemplatesPathMap.ContainsKey($fullTempalteName)) {
-                $diskName = ($allTemplatesPathMap[$fullTempalteName] -split '.templates\\')[1]
+                $diskName = ($allTemplatesPathMap[$fullTempalteName] -split ".templates$separator")[1]
                 $params[0] = $diskName
             } elseif($renamedTempalteArr.ContainsKey($fullTempalteName)){
                 $redirectedName = $renamedTempalteArr[$fullTempalteName]
-                $diskName = ($allTemplatesPathMap[$redirectedName] -split '.templates\\')[1]
+                $diskName = ($allTemplatesPathMap[$redirectedName] -split ".templates$separator")[1]
                 $params[0] = $diskName
             }
 

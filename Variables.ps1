@@ -5,11 +5,11 @@ New-Object Collections.Hashtable ([StringComparer]::CurrentCulture)
 
 #local
 $orphanedPagesFolder = 'Orphaned pages'##vaaror- relook - why not Orphaned-pages
-$separator = "\"
+$separator = [IO.Path]::DirectorySeparatorChar
 $mediaWikiRootCategory = "Hierarchy-Top"
 $mediaWikiTemplatePrefix = "Template:"
 $mediaWikiCategoryPrefix = "Category:"
-$vstsWikiTemplatesDiskPath = ".templates\"
+$vstsWikiTemplatesDiskPath = ".templates$separator"
 $vstsWikiTemplatesPathSyntax = "::: template /.templates/"
 $mediaWikiPageNameKeyword = "PAGENAME"
 
