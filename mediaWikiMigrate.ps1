@@ -680,7 +680,7 @@ function PreprocessRenamedArrayInternal($renamedMap) {
 #-----------------------Processing--------------------------------
 #------------------------------------------------------------------
 function processPage($path) {
-    $pandocCommand = $pandocPath + 'pandoc.exe' 
+    $pandocCommand = $pandocPath + 'pandoc' 
     & $pandocCommand  $path --from=mediawiki --to=gfm  -o $path --eol=native --wrap=preserve
 }
 
