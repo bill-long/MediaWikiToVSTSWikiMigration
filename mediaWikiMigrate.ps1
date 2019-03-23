@@ -9,12 +9,8 @@ param(
     [SecureString]$p,
     [Parameter(Mandatory=$True, HelpMessage="output directory on disk <format: C:\anylocation\>")]
     [string]$o,
-    [Parameter(Mandatory=$True, HelpMessage="vsts wiki clone url <format: https://myacct.visualstudio.com/proj/_git/proj.wiki>")]
-    [string]$vstsWikiRemoteUrl,
     [Parameter(Mandatory=$True, HelpMessage="path where pandoc.exe resides <format: C:\pandoc\>")]
     [string]$pandocPath,
-    [Parameter(Mandatory=$False, HelpMessage="vsts username (Please provide PAT token when asked for password)")]
-    [string]$vstsUserName = "username",
     [Parameter(Mandatory=$False, HelpMessage="mediawiki absolute url(can be different from mediawiki url provided above - to change absolute urls in content) <format: https://mywiki.com/index.php\?title=>")] 
     [string]$originalmMediaWikiUrl, 
     [Parameter(Mandatory=$False, HelpMessage="updated mailto string")]
@@ -31,11 +27,9 @@ $mediaWikiImageBackupPath = $imageDiskPath
 $userName = $u
 $password = ConvertTo-SecureString $pwd -AsPlainText -Force
 
-$wikiName = $vstsWikiRemoteUrl|split-path -leaf
 $rootPath = $o
-$localMachinePath = $o + $wikiName + '\'
-
-$attachmentFolderPath = $localMachinePath + $attachmentFolderName + '\'
+$localMachinePath = $rootPath
+$attachmentFolderPath = Join-Path $rootPath  $attachmentFolderName
 
 #local
 $mediaWikiGetCategoryMembers=$mediaWikiCoreUrl + 'action=query&list=categorymembers&cmlimit=500&cmtitle='
@@ -290,32 +284,35 @@ function getNonTemplatesUsedAsTemplates() {
 }
 
 function getAllPages() {
-    do {
-        $mediaWikiGetAllPagesFullUrl = $mediaWikiCoreUrl + $mediaWikiGetAllPagesPartialUrl + $mediaWikiAllPagesContinuationToken + '=' + $mediaWikiAllPagesContinuationTokenValue
-        
-        $res = Invoke-WebRequest -Uri $mediaWikiGetAllPagesFullUrl -WebSession (Get-WebSession)| ConvertFrom-Json
-
-        If($res.query) {          
-            if($res.continue) {
-                $mediaWikiAllPagesContinuationTokenValue = $res.continue.$mediaWikiAllPagesContinuationToken
-            } else {
-                $mediaWikiAllPagesContinuationTokenValue = ''
-            }
+    $namespaces = @(0, 3000)
+    foreach ($namespace in $namespaces) {
+        do {
+            $mediaWikiGetAllPagesFullUrl = $mediaWikiCoreUrl + $mediaWikiGetAllPagesPartialUrl + "apnamespace=$namespace" + "&" + $mediaWikiAllPagesContinuationToken + '=' + $mediaWikiAllPagesContinuationTokenValue
             
-            # add name to all category array
-            ForEach($child in $res.query.allpages) {
-                $title = $child.title.Trim('\"')
-                
-                if($uniqueNameashTable.ContainsKey($title.ToLower())) {
-                    # if a file with this name already exists - dont process
-                    $duplicatePageNames.Add($title, $uniqueNameashTable[$title.ToLower()]) #TODO do this for categories as well
+            $res = Invoke-WebRequest -Uri $mediaWikiGetAllPagesFullUrl -WebSession (Get-WebSession)| ConvertFrom-Json
+
+            If($res.query) {          
+                if($res.continue) {
+                    $mediaWikiAllPagesContinuationTokenValue = $res.continue.$mediaWikiAllPagesContinuationToken
                 } else {
-                    $uniqueNameashTable.Add($title.ToLower(), $title)
-                    $mediaWikiAllPagesTitleArray.Add($title)
-                }                
+                    $mediaWikiAllPagesContinuationTokenValue = ''
+                }
+                
+                # add name to all category array
+                ForEach($child in $res.query.allpages) {
+                    $title = $child.title.Trim('\"')
+                    
+                    if($uniqueNameashTable.ContainsKey($title.ToLower())) {
+                        # if a file with this name already exists - dont process
+                        $duplicatePageNames.Add($title, $uniqueNameashTable[$title.ToLower()]) #TODO do this for categories as well
+                    } else {
+                        $uniqueNameashTable.Add($title.ToLower(), $title)
+                        $mediaWikiAllPagesTitleArray.Add($title)
+                    }                
+                }
             }
-        }
-    } while ($mediaWikiAllPagesContinuationTokenValue -ne '')
+        } while ($mediaWikiAllPagesContinuationTokenValue -ne '')
+    }
 
 
     $mediaWikiAllPagesTitleArray.ToArray();
@@ -346,7 +343,8 @@ function getAllPagesNameAndHierarchy() {
        }
 
         $relativePath  = $relativePath -replace '\\Hierarchy\%2DTop\\','\' #hardoded here for regex escaping
-        $fileName = $localMachinePath + $relativePath + $urlencodedPageName + ".md"
+        $fileName = Join-Path $localMachinePath $relativePath
+        $fileName = Join-Path $fileName ($urlencodedPageName + ".html")
 
         $allPagesPathMap.Add($item, $fileName)  
     }
@@ -369,7 +367,7 @@ function getAllCategories() {
             ForEach($child in $res.query.allcategories) {
                 $title = $child.psobject.properties.value
                 $fulltitle = $mediaWikiCategoryPrefix + $title
-                $rootPath = '.\' + $orphanedPagesFolder + $separator + $title
+                $rootPath = '.\' + $mediaWikiRootCategory + $separator + $title
                 createTreeForCategory -root $fulltitle -rootPath $rootPath
                 $mediaWikiAllCategoriesTitleArray.Add($fulltitle)
             }
@@ -412,22 +410,27 @@ function getAllTemplates() {
 #------------------------------------------------------------------
 
 function getContent() {
-    getTempaltecontent
+    # getTempaltecontent
     getPageContent
     handleSpecialPages
 }
 
 function getCurrentPage ($itemOriginalName) {
-    $mediaWikiPageContentFullUrl = $mediaWikiCoreUrl + $mediaWikiPageContentPartialUrl + $itemOriginalName
-    $res = Invoke-WebRequest -Uri $mediaWikiPageContentFullUrl -WebSession (Get-WebSession)| ConvertFrom-Json
-    $isMissing = $res.query.pages.psobject.properties.value.missing -eq ''
-    $content = ''
-
-    if(-Not $isMissing) {
-        $content = $res.query.pages.psobject.properties.value.revisions[0].'*'
+    $mediaWikiPageContentFullUrl = "http://localhost:8080/index.php?title=" + [Uri]::EscapeUriString($itemOriginalName.Replace(" ", "_")).Replace("+", "%2B").Replace("&", "%26")
+    try
+    {
+        $res = Invoke-WebRequest -Uri $mediaWikiPageContentFullUrl -WebSession (Get-WebSession)
     }
-    
-    return $content
+    catch
+    {
+        # If it's a category we don't care
+        if (-not $itemOriginalName.StartsWith("Category:"))
+        {
+            Write-Error "Could not get page content:" $itemOriginalName
+        }
+    }
+
+    return $res.Content
 }
 
 function getPageContent() {
@@ -438,6 +441,10 @@ function getPageContent() {
     Foreach ($key in @($allPagesPathMap.Keys)) {
 
         $path = $allPagesPathMap[$key]
+        if (Test-Path $path) {
+            $currentCount++
+            continue
+        }
         $itemOriginalName = $key
 
         Write-Host '****************************************************************************'
@@ -681,7 +688,11 @@ function PreprocessRenamedArrayInternal($renamedMap) {
 #------------------------------------------------------------------
 function processPage($path) {
     $pandocCommand = $pandocPath + 'pandoc.exe' 
-    & $pandocCommand  $path --from=mediawiki --to=gfm  -o $path --eol=native --wrap=preserve
+    $outputPath = ($path -replace "html$", "md")
+    if (-not (Test-Path $outputPath))
+    {
+        & $pandocCommand  $path --from=html --to=gfm  -o $outputPath --eol=native --wrap=preserve
+    }
 }
 
 function processTemplate($path) {
@@ -697,16 +708,16 @@ function migratePage($path, $pageName) {
 
     # why we read write the file content again and again instead of single read in the beginnign and write at the end
     # pandoc (used in processPage step) does not take in raw content instead takes the file path to read and write
-    Write-Host 'preprocessing '$path 'file: '$pageName
-    $preprocessScriptPath = $PSScriptRoot + '\.\preProcess.ps1'
-    & $preprocessScriptPath -pagePath $path -pageName $pageName -mediawikiDomain $mediawikiDomain
+    #Write-Host 'preprocessing '$path 'file: '$pageName
+    #$preprocessScriptPath = $PSScriptRoot + '\.\preProcess.ps1'
+    #& $preprocessScriptPath -pagePath $path -pageName $pageName -mediawikiDomain $mediawikiDomain
 
     Write-Host 'processing '$path 'file: '$pageNam
     processPage $path
 
-    Write-Host 'postprocessing '$path 'file: '$pageNam
-    $postprocessScriptPath = $PSScriptRoot + '\.\postProcess.ps1'
-    & $postprocessScriptPath -pagePath $path -pageName $pageName -allPagesPathMap $allPagesPathMap -allTemplatesPathMap $allTemplatesPathMap -renamedTempalteArr $renamedTempalteArr -localMachinePath $localMachinePath -originalmMediaWikiUrl $originalmMediaWikiUrl -mediawikiDomain $mediawikiDomain
+    #Write-Host 'postprocessing '$path 'file: '$pageNam
+    #$postprocessScriptPath = $PSScriptRoot + '\.\postProcess.ps1'
+    #& $postprocessScriptPath -pagePath $path -pageName $pageName -allPagesPathMap $allPagesPathMap -allTemplatesPathMap $allTemplatesPathMap -renamedTempalteArr $renamedTempalteArr -localMachinePath $localMachinePath -originalmMediaWikiUrl $originalmMediaWikiUrl -mediawikiDomain $mediawikiDomain
     
 
 }
@@ -722,38 +733,6 @@ function migrateTemplate($content, $pageName) {
     Write-Host 'postprocessing '$path ' template : '$pageName
     $postprocessScriptPath = $PSScriptRoot + '\.\postProcess.ps1'
     & $postprocessScriptPath -templatePath $path -templateName $pageName -mediawikiDomain $mediawikiDomain -allPagesPathMap $allPagesPathMap -allTemplatesPathMap $allTemplatesPathMap -renamedTempalteArr $renamedTempalteArr -localMachinePath $localMachinePath -originalmMediaWikiUrl $originalmMediaWikiUrl
-}
-
-#------------------------------------------------------------------
-#---------------------------Git------------------------------------
-#------------------------------------------------------------------
-
-function getGitUrlWithCreadentials() {
-    if($vstsWikiRemoteUrl.StartsWith('http://')) {
-        $splitToken = 'http://'
-    } else {
-        $splitToken = 'https://'
-    }
-
-    $urlArr = $vstsWikiRemoteUrl -split $splitToken
-    $url = $splitToken + $vstsUserName + '@' + $urlArr[1]
-    return $url
-}
-
-function initializeGit() {
-    Set-Location $rootPath
-    $url = getGitUrlWithCreadentials
-    git clone $url -v
-    git pull
-    Set-Location $wikiName
-    git checkout wikiMaster
-}
-
-function pushVSTSWiki() {
-    git add .
-    git commit -m mediWiki
-    git push -f
-
 }
 
 #------------------------------------------------------------------
@@ -917,11 +896,8 @@ function removeRootCategoryPage() {
 }
 
 function migrateToVSTSWiki() {
-    Write-Host '---Fetching existing VSTS Wiki---'
-    initializeGit # does NOT create wiki for now
-
     Write-Host '---Getting All Images---'
-    getAllImages 
+    # getAllImages 
     Write-Host '---Creating PageHierarchy---' -ForegroundColor Cyan
     createPageHierarchy 
     
@@ -964,9 +940,6 @@ function migrateToVSTSWiki() {
         & $finalizingScriptPath -allPagesPathMap $allPagesPathMap -allTemplatesPathMap $allTemplatesPathMap -mediaWikiCoreUrl $mediaWikiCoreUrl -localMachinePath $localMachinePath -renamedItems $renamedItems
     
     }
-
-    Write-Host '---Pushing to  VSTS Wiki---'
-    pushVSTSWiki
 }
 
 migrateToVSTSWiki
