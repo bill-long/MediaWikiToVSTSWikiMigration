@@ -1,20 +1,12 @@
 param(
-    [Parameter(Mandatory=$True, HelpMessage="Your media wiki url for which credentails are provided/open wiki <format: http://localhost:8080/mediawiki>")]
+    [Parameter(Mandatory=$True, HelpMessage="Your media wiki url <format: http://localhost:8080/mediawiki>")]
     [string]$mediWikiUrl, 
-    [Parameter(Mandatory=$True, HelpMessage="Your image backup location <format: C:\xampp\htdocs\mediawiki\images>")]
-    [string]$imageDiskPath, 
-    [Parameter(Mandatory=$True, HelpMessage="mediawiki username <format: alias>" )]
-    [string]$u,
-    [Parameter(Mandatory=$True, HelpMessage="mediawiki password")]
-    [SecureString]$p,
     [Parameter(Mandatory=$True, HelpMessage="output directory on disk <format: C:\anylocation\>")]
     [string]$o,
     [Parameter(Mandatory=$True, HelpMessage="path where pandoc.exe resides <format: C:\pandoc\>")]
     [string]$pandocPath,
     [Parameter(Mandatory=$False, HelpMessage="mediawiki absolute url(can be different from mediawiki url provided above - to change absolute urls in content) <format: https://mywiki.com/index.php\?title=>")] 
-    [string]$originalmMediaWikiUrl, 
-    [Parameter(Mandatory=$False, HelpMessage="updated mailto string")]
-    [string]$mailToOrg
+    [string]$originalmMediaWikiUrl
     )
 
     $variablesPath  = $PSScriptRoot + '\.\Variables.ps1'
@@ -22,14 +14,9 @@ param(
 
 #input
 $mediaWikiCoreUrl = $mediWikiUrl + '/api.php?format=json&'
-$mediaWikiImageBackupPath = $imageDiskPath
-
-$userName = $u
-$password = ConvertTo-SecureString $pwd -AsPlainText -Force
 
 $rootPath = $o
-$localMachinePath = $rootPath
-$attachmentFolderPath = Join-Path $rootPath  $attachmentFolderName
+$localMachinePath = $o
 
 #local
 $mediaWikiGetCategoryMembers=$mediaWikiCoreUrl + 'action=query&list=categorymembers&cmlimit=500&cmtitle='
@@ -37,7 +24,6 @@ $mediawikiDomain = $originalmMediaWikiUrl.Split('/')[2]
 
 $mediaWikiAllCategoriesTitleArray =  New-Object System.Collections.Generic.List[System.Object]
 $mediaWikiAllPagesTitleArray =  New-Object System.Collections.Generic.List[System.Object]
-$mediaWikiPageNamesContainingSlash =  New-Object System.Collections.Generic.List[System.Object]
 $emptyCategoryFiles = New-Object System.Collections.Generic.List[System.Object]
 $nonTempaltesArr = New-Object System.Collections.Generic.List[System.Object]
 
@@ -53,51 +39,6 @@ $donePaths = New-CHashtable
 #------------------------------------------------------------------
 #---------------------------General Methods------------------------------------
 #------------------------------------------------------------------
-
-function Get-WebSession()
-{
-    
-    if($websession -eq $null)
-    {
-        Invoke-LogIn $userName $password
-    }
-    return $websession
-}
-
-function Invoke-Login($username, $password)
-{
-    $uri = $mediaWikiCoreUrl
-
-    $body = @{}
-    $body.action = 'login'
-    $body.format = 'json'
-    $body.lgname = $username
-    $body.lgpassword = $password
-
-
-    $object = Invoke-WebRequest $uri -Method Post -Body $body -SessionVariable global:websession
-    $json = $object.Content
-    $object = ConvertFrom-Json $json
-    
-    if($object.login.result -eq 'NeedToken')
-    {
-        $uri = $mediaWikiCoreUrl
-        
-        $body.action = 'login'
-        $body.format = 'json'
-        $body.lgname = $username
-        $body.lgpassword = $password
-        $body.lgtoken = $object.login.token
-
-        $object = Invoke-WebRequest $uri -Method Post -Body $body -WebSession $global:websession
-        $json = $object.Content
-        $object = ConvertFrom-Json $json
-    }
-    if($object.login.result -ne 'Success')
-    {
-       # throw ('Login.result = ' + $object.login.result)
-    }
-}
 
 function formatPageName($pageName) {
     $pageName = renameCategoryPages($pageName)
@@ -122,12 +63,6 @@ function replaceSpaceInPageName($pathName) {
     $pathName = $pathName.Replace(' ','-')
 
     return $pathName
-}
-
-function replaceUnderscoreInPageName($pageName) {
-    $pageName = $pageName.Replace('_',' ') # varor : added : changed it to space and not hyphen
-
-    return $pageName
 }
 
 function replaceSpecialCharacters($pathName) {
@@ -167,7 +102,7 @@ function FetchChildrenForCategory($category) {
     If($category.StartsWith($mediaWikiCategoryPrefix)) {
     
         $mediaWikiGetCategoryMembersFullUrl  = $mediaWikiGetCategoryMembers + $category.Replace('%5C','\')
-        $res = Invoke-WebRequest -Uri $mediaWikiGetCategoryMembersFullUrl -WebSession (Get-WebSession)| ConvertFrom-Json
+        $res = Invoke-WebRequest -Uri $mediaWikiGetCategoryMembersFullUrl | ConvertFrom-Json
         return $res.query.categorymembers
     }
 
@@ -225,62 +160,9 @@ function createPageHierarchy() {
     createCategoryTree #populates categoryTreeHashTable- Anything not in this will be in flat hierarchy
     getAllCategories  #$mediaWikiAllCategoriesTitleArray
     getAllPages  #mediaWikiAllPagesTitleArray
-    getAllTemplates 
 
-    #now that all pages, categories, tempaltes are here form a tree
+    #now that all pages, categories are here form a tree
     getAllPagesNameAndHierarchy #allPagesPathMap
-    getNonTemplatesUsedAsTemplates #pages used as tempaltes will be move to templates folder - get those 
-}
-
-function getNonTemplatesUsedAsTemplates() {
-    ForEach($key in $allPagesPathMap.Keys) {
-        
-        $mediaWikiGetAllPageTemplate = $mediaWikiCoreUrl + '&action=query&titles='+$key + '&prop=templates&tllimit=500'
-        $res = Invoke-WebRequest -Uri $mediaWikiGetAllPageTemplate | ConvertFrom-Json
-
-        $templates =  $res.query.pages.psobject.properties.value.templates 
-        if($templates) {
-            forEach($template in $templates) {
-                $name = $template.title
-
-                if(-Not $name.StartsWith($mediaWikiTemplatePrefix) -and -Not $nonTempaltesArr.Contains($name)) {
-                    $nonTempaltesArr.Add($name)
-                }
-            }
-        }
-    }
-
-    Write-Host 'total count of non tempalte pages used as templates' $nonTempaltesArr.Count
-    [System.Collections.ArrayList]$RemovalList = @()
-
-    ForEach($item in $nonTempaltesArr) {
-
-        if($allPagesPathMap.ContainsKey($item)) {
-
-            $path = $allPagesPathMap[$item]
-            $name = $path.Substring($path.LastIndexOf($separator)+1)
-
-            #check if tempalte with name TEmplate: <$item> does not already exisit
-            $potentialTemplateName = $mediaWikiTemplatePrefix + $item
-
-            if($allTemplatesPathMap.ContainsKey($potentialTemplateName)) {
-                Write-Host 'Same name template already exists'$potentialTemplateName
-                #rocky terrain - better to not move this tempalte
-                $RemovalList.Add($item)
-            }
-            else {
-                if($name.StartsWith($mediaWikiCategoryPrefix)) {
-                    $name = $name.Remove(0,$mediaWikiCategoryPrefix.Length-1) # leave a trailing ':' to identify it as  a page
-                }
-                $newName = $localMachinePath + $vstsWikiTemplatesDiskPath +$name
-            }
-            $allTemplatesPathMap.Add($item, $newName)
-        } 
-    }
-
-    foreach($item in $RemovalList){
-        $nonTempaltesArr.Remove($item)
-    }
 }
 
 function getAllPages() {
@@ -289,7 +171,7 @@ function getAllPages() {
         do {
             $mediaWikiGetAllPagesFullUrl = $mediaWikiCoreUrl + $mediaWikiGetAllPagesPartialUrl + "apnamespace=$namespace" + "&" + $mediaWikiAllPagesContinuationToken + '=' + $mediaWikiAllPagesContinuationTokenValue
             
-            $res = Invoke-WebRequest -Uri $mediaWikiGetAllPagesFullUrl -WebSession (Get-WebSession)| ConvertFrom-Json
+            $res = Invoke-WebRequest -Uri $mediaWikiGetAllPagesFullUrl | ConvertFrom-Json
 
             If($res.query) {          
                 if($res.continue) {
@@ -339,7 +221,7 @@ function getAllPagesNameAndHierarchy() {
 
         # move all unparented the pages to this hierarchy by default
         If($relativePath -eq $separator  ) {
-                $relativePath = '\Orphaned-pages\'
+                $relativePath = $orphanedPagesFolder
        }
 
         $relativePath  = $relativePath -replace '\\Hierarchy\%2DTop\\','\' #hardoded here for regex escaping
@@ -354,7 +236,7 @@ function getAllCategories() {
     # Get all categories
     do {
         $mediaWikiGetAllCatgoriesFullUrl = $mediaWikiCoreUrl + $mediaWikiGetAllCatgoriesPartialUrl + $mediaWikiAllCategoriesContinuationToken + '=' + $mediaWikiAllCategoriesContinuationTokenValue
-        $res = Invoke-WebRequest -Uri $mediaWikiGetAllCatgoriesFullUrl -WebSession (Get-WebSession)| ConvertFrom-Json
+        $res = Invoke-WebRequest -Uri $mediaWikiGetAllCatgoriesFullUrl | ConvertFrom-Json
         
         If($res.query) {
             # new continuation token
@@ -377,34 +259,6 @@ function getAllCategories() {
     $mediaWikiAllCategoriesTitleArray.ToArray();
 }
 
-function getAllTemplates() {
-    $mediaWikiAllTemplatesContinuationTokenValue = ''
-    # Get all templates
-    do {
-        $mediaWikiGetAllTemplatesFullUrl = $mediaWikiCoreUrl + $mediaWikiGetAllPagesPartialUrl + $mediaWikiAllPagesContinuationToken + '=' + $mediaWikiAllTemplatesContinuationTokenValue + '&apnamespace=10'
-        
-        $res = Invoke-WebRequest -Uri $mediaWikiGetAllTemplatesFullUrl -WebSession (Get-WebSession)| ConvertFrom-Json
-
-        If($res.query) {
-            # new continuation token        
-            if($res.continue) {
-                $mediaWikiAllTemplatesContinuationTokenValue = $res.continue.$mediaWikiAllPagesContinuationToken
-            } else {
-                $mediaWikiAllTemplatesContinuationTokenValue = ''
-            }
-            
-            # add name to all category array
-            ForEach($child in $res.query.allpages) {
-                $title = $child.title.Trim('\"')
-                $prunedTitle = $title.Remove(0, $mediaWikiTemplatePrefix.Length)
-                $formattedName = formatPageName $prunedTitle
-                $path = $localMachinePath + $vstsWikiTemplatesDiskPath + $formattedName + '.md'
-                $allTemplatesPathMap[$title] = $path
-            }
-        }
-    } while ($mediaWikiAllTemplatesContinuationTokenValue)
-}
-
 #------------------------------------------------------------------
 #------------------- Page Content----------------------------------
 #------------------------------------------------------------------
@@ -419,12 +273,12 @@ function getCurrentPage ($itemOriginalName) {
     $mediaWikiPageContentFullUrl = "http://localhost:8080/index.php?title=" + [Uri]::EscapeUriString($itemOriginalName.Replace(" ", "_")).Replace("+", "%2B").Replace("&", "%26")
     try
     {
-        $res = Invoke-WebRequest -Uri $mediaWikiPageContentFullUrl -WebSession (Get-WebSession)
+        $res = Invoke-WebRequest -Uri $mediaWikiPageContentFullUrl
     }
     catch
     {
         # If it's a category we don't care
-        if (-not $itemOriginalName.StartsWith("Category:"))
+        if ($itemOriginalName -ne $null -and $itemOriginalName.StartsWith("Category:"))
         {
             Write-Error "Could not get page content:" $itemOriginalName
         }
@@ -485,40 +339,6 @@ function getPageContent() {
     Write-Host '#####################################################'
 
     Write-Host 'FINISHED WITH '$allPagesPathMap.Count
-}
-
-function getTempaltecontent() {
-    Foreach ($key in $allTemplatesPathMap.Keys) {
-        
-        $path = $allTemplatesPathMap[$key]
-        $content = getCurrentPage $key 
-        #if it is a redirect only page, do not create the page, instead save separately
-        if($content) {
-            if(isRedirectPage $content){ 
-                $renamedName = getRenameName $content
-                $renamedTempalteArr.Add($key, $renamedName)
-            } else {
-                createPage -path $path -content $content
-            }
-        }
-    }
-
-    #remove renamed items from main arr
-    foreach($key in $renamedTempalteArr.Keys) {
-        $allTemplatesPathMap.Remove($key)
-    }
-}
-
-function getRenameName($content) {
-    If(isRedirectPage $content) {
-         #if content starts with REDIRECT ignore it
-         $renamedPathArr = $content -split $renamedPageRegEx
-         $renamedName  = $renamedPathArr[1].TrimStart(':').Replace('_',' ')
-
-         return $renamedName
-    }
-    
-    return ''
 }
 
 # empty category file is different from empty file. 
@@ -692,6 +512,31 @@ function processPage($path) {
     if (-not (Test-Path $outputPath))
     {
         & $pandocCommand  $path --from=html --to=gfm  -o $outputPath --eol=native --wrap=preserve
+
+        # Remove edit links
+        $content = Get-Content $outputPath -Raw; $content = $content -replace "\<span class=`"mw-editsection`"\>(.*?)\</span></span>", ""; Set-Content $outputPath -Value $content
+
+        # Remove footers
+        if ($content.IndexOf("<div class=`"printfooter`"") -gt -1) {
+            $content = $content.Substring(0, $content.IndexOf("<div class=`"printfooter`"")); Set-Content $outputPath -Value $content
+        }
+
+        # Remove headers
+        if ($content.IndexOf("<div id=`"mw-content-text`"") -gt -1) {
+            $content = $content.Substring($content.IndexOf("<div id=`"mw-content-text`"")); Set-Content $outputPath -Value $content
+        }
+
+        # Get images
+        while ($content -match "\!\[.*?\]\((/images.*?)\)\]") {
+            $imageOutputPath = ((Join-Path $rootPath ".images") + "\" + ($matches[1] -replace "/.*/", ""))
+            if (-not (Test-Path $imageOutputPath))
+            {
+                Invoke-WebRequest ("http://localhost:8080" + $matches[1]) -OutFile $imageOutputPath
+            }
+
+            $content = $content -replace $matches[1], ("/.images/" + ($matches[1] -replace "/.*/", ""))
+            Set-Content $outputPath -Value $content
+        }
     }
 }
 
